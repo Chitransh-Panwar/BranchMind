@@ -2,3 +2,5 @@
 **/__pycache__/
 myvenv/
 spike_cognee.py
+# Ignore scratch and spike scripts
+spike_cognee.py
