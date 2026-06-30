@@ -1,3 +1,4 @@
 .env*
 **/__pycache__/
 myvenv/
+spike_cognee.py
