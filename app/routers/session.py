@@ -17,6 +17,20 @@ class BranchCreate(BaseModel):
 class QueryRequest(BaseModel):
     question:str
 
+@router.get("/sessions/{sessions_id}/tree")
+def get_tree(session_id:str):
+    session=supabase.table("sessions").select("id").eq("id",session_id).execute()
+    if not session.data:
+        raise HTTPException(status_code=404,detail="session not found")
+    branches=supabase.table("branches").select("*").eq("session_id",session_id).order("created_at").execute()
+    if not branches.data:
+        return {"branches":[],"checkpoints":[]}
+    branch_ids=[b["id"] for b in branches.data]
+    checkpoints=supabase.table("checkpoints").select("*").in_("branch_id",branch_ids).order("created_at").execute()
+    return {"branches":branches.data,"checkpoints":checkpoints.data}
+
+
+
 @router.post("/sessions")
 def create_session():
     session = supabase.table("sessions").insert({}).execute()
