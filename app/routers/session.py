@@ -1,4 +1,5 @@
-from fastapi import APIRouter,HTTPException
+from fastapi import APIRouter,HTTPException,BackgroundTasks
+from app.cognee_client import ingest_exchange,query_graph
 from pydantic import BaseModel
 import httpx
 import hashlib
@@ -13,6 +14,9 @@ class MessageCreate(BaseModel):
 class BranchCreate(BaseModel):
     name:str | None = None
 
+class QueryRequest(BaseModel):
+    question:str
+
 @router.post("/sessions")
 def create_session():
     session = supabase.table("sessions").insert({}).execute()
@@ -25,35 +29,6 @@ def create_session():
     branch_id = branch.data[0]["id"]
 
     return {"session_id": session_id, "root_branch_id": branch_id}
-
-@router.post("/branches/{branch_id}/messages")
-async def post_messages(branch_id:str,msg:MessageCreate):
-    branch=supabase.table("branches").select("id").eq("id",branch_id).execute()
-    if not branch.data:
-        raise HTTPException(status_code=404,detail="branch not found")
-    supabase.table("messages").insert({
-        "branch_id":branch_id,
-        "role":"user",
-        "content":msg.content,
-    }).execute()
-    history=supabase.table("messages").select("role,content").eq("branch_id",branch_id).order("seq").execute()
-    llm_messages=[{"role":m["role"],"content":m["content"]} for m in history.data]
-    async with httpx.AsyncClient(timeout=60) as client :
-        resp=await client.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={"Authorization":f"Bearer {settings.openrouter_api_key}"},
-            json={"model":settings.openrouter_model,"messages":llm_messages},
-        )
-    if resp.status_code!=200:
-        raise HTTPException(status_code=502,detail=f"OpenROuter error : {resp.text}")
-    reply_content=resp.json()["choices"][0]["message"]["content"]
-    saved=supabase.table("messages").insert({
-        "branch_id":branch_id,
-        "role":"assistant",
-        "content":reply_content,
-    }).execute()
-
-    return saved.data[0]
 
 @router.get("/branches/{branch_id}/messages")
 def get_messages(branch_id:str):
@@ -83,6 +58,7 @@ def create_checkpoints(branch_id:str):
 
 @router.post("/checkpoints/{checkpoint_id}/branch")
 def fork_branch(checkpoint_id:str,body:BranchCreate):
+
     checkpoint=supabase.table("checkpoints").select("*").eq("id",checkpoint_id).execute()
     if not checkpoint.data:
         raise HTTPException(status_code=404,detail="checkpoint not found ")
@@ -103,3 +79,43 @@ def fork_branch(checkpoint_id:str,body:BranchCreate):
         supabase.table("messages").insert(row_to_copy).execute()
 
     return{"branch_id":new_branch_id,"forked_from_checkpoint":checkpoint_id,"messages_copied":len(row_to_copy)}
+
+@router.post("/branches/{branch_id}/messages")
+async def post_messages(branch_id:str,msg:MessageCreate,background_tasks:BackgroundTasks):
+    branch =supabase.table("branches").select("id,session_id").eq("id",branch_id).execute()
+    if not branch.data:
+        raise HTTPException(status_code=404,detail="branch not found")
+    session_id=branch.data[0]["session_id"]
+    supabase.table("messages").insert({
+        "branch_id":branch_id,
+        "role":"user",
+        "content":msg.content,
+    }).execute()
+
+    history=supabase.table("messages").select("role,content").eq("branch_id",branch_id).order("seq").execute()
+    llm_messages=[{"role":m["role"],"content":m["content"]} for m in history.data]
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {settings.groq_api_key}"},
+            json={"model": settings.groq_model, "messages": llm_messages,"max_tokens":250},
+        )
+    if resp.status_code!=200:
+        raise HTTPException(status_code=502,detail=f"OpenRouter error: {resp.text}")
+    reply_content=resp.json()["choices"][0]["message"]["content"]
+    saved=supabase.table("messages").insert({
+        "branch_id":branch_id,
+        "role":"assistant",
+        "content":reply_content
+    }).execute()
+
+    background_tasks.add_task(ingest_exchange,session_id,branch_id,msg.content,reply_content)
+    return saved.data[0]
+
+@router.post("/sessions/{session_id}/query")
+async def query_session(session_id:str,body:QueryRequest):
+    session=supabase.table("sessions").select("id").eq("id",session_id).execute()
+    if not session.data:
+        raise HTTPException(status_code=404,detail="session not found")
+    results=await query_graph(session_id,body.question)
+    return {"results":results}

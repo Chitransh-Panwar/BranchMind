@@ -19,6 +19,7 @@ def _dataset_for_session(session_id:str)->str:
 
 async def ingest_exchange(session_id:str,branch_id:str,user_content:str,assistant_content:str):
     dataset_name=_dataset_for_session(session_id)
+    print("cognify started. ")
     text=f"User: {user_content}\nAssistant: {assistant_content}"
     item =DataItem(
         data=text,
@@ -27,6 +28,7 @@ async def ingest_exchange(session_id:str,branch_id:str,user_content:str,assistan
     )
     await cognee.add(item,dataset_name=dataset_name)
     await cognee.cognify(datasets=[dataset_name])
+    print("cognify completed")
 
 async def query_graph(session_id:str,question:str):
     dataset_name=_dataset_for_session(session_id)
@@ -35,4 +37,5 @@ async def query_graph(session_id:str,question:str):
         query_type=cognee.SearchType.GRAPH_COMPLETION,
         datasets=[dataset_name],
     )
+    print("graph query completed ")
     return results 
