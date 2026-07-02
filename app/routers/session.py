@@ -16,20 +16,20 @@ class BranchCreate(BaseModel):
 
 class QueryRequest(BaseModel):
     question:str
-
-@router.get("/sessions/{sessions_id}/tree")
-def get_tree(session_id:str):
-    session=supabase.table("sessions").select("id").eq("id",session_id).execute()
+@router.get("/sessions/{session_id}/tree")
+def get_tree(session_id: str):
+    session = supabase.table("sessions").select("id").eq("id", session_id).execute()
     if not session.data:
-        raise HTTPException(status_code=404,detail="session not found")
-    branches=supabase.table("branches").select("*").eq("session_id",session_id).order("created_at").execute()
+        raise HTTPException(status_code=404, detail="session not found")
+
+    branches = supabase.table("branches").select("*").eq("session_id", session_id).order("created_at").execute()
     if not branches.data:
-        return {"branches":[],"checkpoints":[]}
-    branch_ids=[b["id"] for b in branches.data]
-    checkpoints=supabase.table("checkpoints").select("*").in_("branch_id",branch_ids).order("created_at").execute()
-    return {"branches":branches.data,"checkpoints":checkpoints.data}
+        return {"branches": [], "checkpoints": []}
 
+    branch_ids = [b["id"] for b in branches.data]
+    checkpoints = supabase.table("checkpoints").select("*").in_("branch_id", branch_ids).order("created_at").execute()
 
+    return {"branches": branches.data, "checkpoints": checkpoints.data}
 
 @router.post("/sessions")
 def create_session():
@@ -127,9 +127,12 @@ async def post_messages(branch_id:str,msg:MessageCreate,background_tasks:Backgro
     return saved.data[0]
 
 @router.post("/sessions/{session_id}/query")
-async def query_session(session_id:str,body:QueryRequest):
-    session=supabase.table("sessions").select("id").eq("id",session_id).execute()
+async def query_session(session_id: str, body: QueryRequest):
+    session = supabase.table("sessions").select("id").eq("id", session_id).execute()
     if not session.data:
-        raise HTTPException(status_code=404,detail="session not found")
-    results=await query_graph(session_id,body.question)
-    return {"results":results}
+        raise HTTPException(status_code=404, detail="session not found")
+
+    results = await query_graph(session_id, body.question)
+    if results is None:
+        results=[]
+    return {"results": results}

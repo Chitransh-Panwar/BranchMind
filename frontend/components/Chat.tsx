@@ -63,7 +63,7 @@ export default function Chat({ messages, onSend, sending }: Props) {
             onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
             placeholder="message this branch..."
             disabled={sending}
-            className="flex-1 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-3 py-2 text-sm font-mono text-gray-300 placeholder-gray-600 focus:outline-none focus:border-purple-500 disabled:opacity-50 transition-colors"
+            className="flex-1 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-3 py-2 text-sm font-mono text-gray-300 placeholder-gray-600 focus:outline-none focus:border-purple-500 disabled:opacity-50 transition-colors text-white"
           />
           <button
             onClick={handleSend}

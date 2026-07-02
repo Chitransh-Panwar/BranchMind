@@ -23,11 +23,12 @@ export interface Checkpoint {
     last_message_seq:number
     created_at:string
 }
-export const createSession=()=>
-    fetch(`${BASE}/sessions`,{method:'POST'}).then(r=>r.json()) as Promise<{session_id:string;root_branch_id:string}>
 
-export const getMessage=(branchId:string,content:string) => 
-    fetch(`${BASE}/branches/${branchId}/messages`).then(r=>r.json()) as Promise<Message[]>
+export const createSession = () =>
+  fetch(`${BASE}/sessions`, { method: 'POST' }).then(r => r.json()) as Promise<{ session_id: string; root_branch_id: string }>
+
+export const getMessages = (branchId: string) =>
+  fetch(`${BASE}/branches/${branchId}/messages`).then(r => r.json()) as Promise<Message[]>
 
 export const sendMessage=(branchId:string,content:string) =>
     fetch(`${BASE}/branches/${branchId}/messages`,{
@@ -49,9 +50,16 @@ export const forkBranch=(checkpointId:string) =>
 export const getTree=(sessionId:string) =>
     fetch(`${BASE}/sessions/${sessionId}/tree`).then(r => r.json()) as Promise<{ branches: Branch[]; checkpoints: Checkpoint[] }>
 
-export const queryGraph=(sessionId:string,question:string) =>
-    fetch(`${BASE}/sessions/${sessionId}/query`,{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({})
-    }).then(r=>r.json()) as Promise<{results:any}> 
+// ✅ FIXED: Pass the question string down into the body dictionary object payload
+export const queryGraph = (sessionId: string, question: string) =>
+    fetch(`${BASE}/sessions/${sessionId}/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: question }) 
+    }).then(async r => {
+        if (!r.ok) {
+            const errLog = await r.json().catch(() => ({}));
+            throw new Error(errLog.detail || `Server validation status error: ${r.status}`);
+        }
+        return r.json();
+    }) as Promise<{ results: any }>;

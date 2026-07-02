@@ -16,3 +16,23 @@ body {
   border-color: #2a2a2a !important;
   color: #e5e5e5 !important;
 }
+input {
+  color: inherit;
+  background: transparent;
+}
+
+.react-flow__node {
+  color: #e5e5e5 !important;
+}
+.react-flow__controls-button {
+  background: #1a1a1a !important;
+  border-color: #2a2a2a !important;
+  fill: #e5e5e5 !important;
+}
+
+.react-flow__controls-button svg {
+  fill: #e5e5e5 !important;
+}
+button {
+  color: inherit;
+}
