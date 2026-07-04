@@ -24,6 +24,16 @@ export interface Checkpoint {
     created_at:string
 }
 
+export interface Dependency {
+    id:string
+    session_id:string
+    branch_id:string
+    from_decision:string
+    to_decision:string
+    relationship:string
+    created_at:string
+}
+
 export const createSession = () =>
   fetch(`${BASE}/sessions`, { method: 'POST' }).then(r => r.json()) as Promise<{ session_id: string; root_branch_id: string }>
 
@@ -46,9 +56,14 @@ export const forkBranch=(checkpointId:string) =>
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({})
     }).then(r=>r.json()) as Promise<{branch_id:string}>
+export const getTree = (sessionId: string) =>
+  fetch(`${BASE}/sessions/${sessionId}/tree`).then(r => r.json()) as Promise<{ 
+    branches: Branch[]
+    checkpoints: Checkpoint[] 
+  }>
 
-export const getTree=(sessionId:string) =>
-    fetch(`${BASE}/sessions/${sessionId}/tree`).then(r => r.json()) as Promise<{ branches: Branch[]; checkpoints: Checkpoint[] }>
+export const getDependencies = (sessionId: string) =>
+  fetch(`${BASE}/sessions/${sessionId}/dependencies`).then(r => r.json()) as Promise<{ dependencies: Dependency[] }>
 
 export const revertToCheckpoint = (checkpointId:string) => 
     fetch(`${BASE}/checkpoints/${checkpointId}/revert`,{method:'POST'}).then(r=>r.json())

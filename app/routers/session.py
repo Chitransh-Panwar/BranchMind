@@ -17,6 +17,11 @@ class BranchCreate(BaseModel):
 class QueryRequest(BaseModel):
     question:str
 
+@router.get("/sessions/{session_id}/dependencies")
+def get_dependencies(session_id:str):
+    deps=supabase.table("decision_dependencies").select("*").eq("session_id",session_id).execute()
+    return {"dependencies":deps.data}
+
 @router.post("/checkpoints/{checkpoint_id}/revert")
 def revert_to_checkpoint(checkpoint_id:str):
     checkpoint=supabase.table("checkpoints").select("*").eq("id",checkpoint_id).execute()
@@ -124,7 +129,7 @@ async def post_messages(branch_id:str,msg:MessageCreate,background_tasks:Backgro
         resp = await client.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {settings.groq_api_key}"},
-            json={"model": settings.groq_model, "messages": llm_messages,"max_tokens":250},
+            json={"model": settings.groq_model, "messages": llm_messages,"max_tokens":150},
         )
     if resp.status_code!=200:
         raise HTTPException(status_code=502,detail=f"OpenRouter error: {resp.text}")

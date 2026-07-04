@@ -8,6 +8,9 @@ import * as api from "@/lib/api";
 export default function Main() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [activeBranchId, setActiveBranchId] = useState<string | null>(null);
+  const [selectedCheckpointId, setSelectedCheckpointId] = useState<
+    string | null
+  >(null);
   const [messages, setMessages] = useState<api.Message[]>([]);
   const [branches, setBranches] = useState<api.Branch[]>([]);
   const [checkpoints, setCheckpoints] = useState<api.Checkpoint[]>([]);
@@ -16,19 +19,26 @@ export default function Main() {
   const [queryInput, setQueryInput] = useState("");
   const [queryResult, setQueryResult] = useState<string | null>(null);
   const [querying, setQuerying] = useState(false);
-
-  useEffect(() => {
-    api.createSession().then(({ session_id, root_branch_id }) => {
-      (setSessionId(session_id), setActiveBranchId(root_branch_id));
-    });
-  }, []);
+  const [reverting, setReverting] = useState(false);
+  const [dependencies, setDependencies] = useState<api.Dependency[]>([]);
 
   const refreshTree = useCallback(async () => {
     if (!sessionId) return;
-    const { branches, checkpoints } = await api.getTree(sessionId);
-    setBranches(branches);
-    setCheckpoints(checkpoints);
+    const [treeData, depsData] = await Promise.all([
+      api.getTree(sessionId),
+      api.getDependencies(sessionId),
+    ]);
+    setBranches(treeData.branches);
+    setCheckpoints(treeData.checkpoints);
+    setDependencies(depsData.dependencies);
   }, [sessionId]);
+
+  useEffect(() => {
+    api.createSession().then(({ session_id, root_branch_id }) => {
+      setSessionId(session_id);
+      setActiveBranchId(root_branch_id);
+    });
+  }, []);
 
   useEffect(() => {
     if (!activeBranchId || !sessionId) return;
@@ -50,10 +60,9 @@ export default function Main() {
         created_at: new Date().toISOString(),
       },
     ]);
-
     await api.sendMessage(activeBranchId, content);
-    const update = await api.getMessages(activeBranchId);
-    setMessages(update);
+    const updated = await api.getMessages(activeBranchId);
+    setMessages(updated);
     setSending(false);
   };
 
@@ -64,45 +73,46 @@ export default function Main() {
   };
 
   const handleFork = async () => {
-    if (!activeBranchId) return
-    const branchCps = checkpoints.filter(c => c.branch_id === activeBranchId)
+    if (!activeBranchId) return;
+    const branchCps = checkpoints.filter((c) => c.branch_id === activeBranchId);
     if (!branchCps.length) {
-      alert('Checkpoint this branch first before forking.')
-      return
+      alert("Checkpoint this branch first before forking.");
+      return;
     }
-    const latest = branchCps[branchCps.length - 1]
-    const { branch_id } = await api.forkBranch(latest.id)
-    await refreshTree()
-    await new Promise(r => setTimeout(r, 1500))
-    setActiveBranchId(branch_id)
-  }
+    const latest = branchCps[branchCps.length - 1];
+    const { branch_id } = await api.forkBranch(latest.id);
+    await refreshTree();
+    await new Promise((r) => setTimeout(r, 1500));
+    setActiveBranchId(branch_id);
+  };
 
-const handleQuery = async () => {
-    try {
-        setQuerying(true);
-        setQueryResult(null);
-        
-        const response = await api.queryGraph(sessionId!, queryInput);
-        
-        // ✅ FIXED: Safe optional chaining evaluation prevents crashes if results parameter is missing
-        if (response && response.results && Array.isArray(response.results)) {
-            const text = response.results
-                .flatMap((r: any) => r.search_result || [])
-                .join("\n");
-            setQueryResult(text || "No results found.");
-        } else {
-            setQueryResult("No results returned from graph pipeline.");
-        }
-    } catch (err: any) {
-        console.error("Graph execution pipeline failed:", err);
-        setQueryResult(`Query processing failure: ${err.message || err}`);
-    } finally {
-        setQuerying(false);
+  const handleRevert = async () => {
+    if (!selectedCheckpointId || reverting) return;
+    setReverting(true);
+    await api.revertToCheckpoint(selectedCheckpointId);
+    const cp = checkpoints.find((c) => c.id === selectedCheckpointId);
+    if (cp) {
+      setActiveBranchId(cp.branch_id);
+      await new Promise((r) => setTimeout(r, 500));
+      const updated = await api.getMessages(cp.branch_id);
+      setMessages(updated);
     }
-};
+    await refreshTree();
+    setSelectedCheckpointId(null);
+    setReverting(false);
+  };
 
+  const handleQuery = async () => {
+    if (!sessionId || !queryInput.trim()) return;
+    setQuerying(true);
+    setQueryResult(null);
+    const { results } = await api.queryGraph(sessionId, queryInput);
+    const text = results.flatMap((r: any) => r.search_result).join("\n");
+    setQueryResult(text || "No results found.");
+    setQuerying(false);
+  };
 
-  const canFork = checkpoints?.some((c) => c.branch_id === activeBranchId);
+  const canFork = checkpoints.some((c) => c.branch_id === activeBranchId);
 
   return (
     <div className="flex flex-col h-screen bg-[#0d0d0d]">
@@ -131,6 +141,15 @@ const handleQuery = async () => {
           >
             ⎇ fork
           </button>
+          {selectedCheckpointId && (
+            <button
+              onClick={handleRevert}
+              disabled={reverting}
+              className="px-3 py-1.5 text-xs font-mono bg-[#1a1a1a] border border-red-500/50 text-red-400 rounded hover:bg-red-500/10 disabled:opacity-40 transition-colors"
+            >
+              {reverting ? "reverting..." : "↩ revert here"}
+            </button>
+          )}
           <button
             onClick={() => {
               setShowQuery(!showQuery);
@@ -193,16 +212,25 @@ const handleQuery = async () => {
               branches ·{" "}
               <span className="text-gray-500">{checkpoints.length}</span>{" "}
               checkpoints
+              {selectedCheckpointId && (
+                <span className="text-red-400 ml-3">
+                  ↩ click revert to restore this checkpoint
+                </span>
+              )}
             </span>
           </div>
           <BranchTree
             branches={branches}
             checkpoints={checkpoints}
+            dependencies={dependencies}
             activeBranchId={activeBranchId}
+            selectedCheckpointId={selectedCheckpointId}
             onSelectBranch={(id) => {
+              setSelectedCheckpointId(null);
               setActiveBranchId(id);
               setMessages([]);
             }}
+            onSelectCheckpoint={setSelectedCheckpointId}
           />
         </div>
       </div>
