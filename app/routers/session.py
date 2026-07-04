@@ -16,6 +16,18 @@ class BranchCreate(BaseModel):
 
 class QueryRequest(BaseModel):
     question:str
+
+@router.post("/checkpoints/{checkpoint_id}/revert")
+def revert_to_checkpoint(checkpoint_id:str):
+    checkpoint=supabase.table("checkpoints").select("*").eq("id",checkpoint_id).execute()
+    if not checkpoint.data:
+        raise HTTPException(status_code=404,detail="checkpoint not found")
+    checkpoint=checkpoint.data[0]
+    supabase.table("messages").delete().eq("branch_id",checkpoint["branch_id"]).gt("seq",checkpoint["last_message_seq"]).execute()
+
+    supabase.table("checkpoints").delete().eq("branch_id",checkpoint["branch_id"]).gt("created_at",checkpoint["created_at"]).execute()
+    return {"reverted_to":checkpoint_id,"branch_id":checkpoint["branch_id"]}
+
 @router.get("/sessions/{session_id}/tree")
 def get_tree(session_id: str):
     session = supabase.table("sessions").select("id").eq("id", session_id).execute()

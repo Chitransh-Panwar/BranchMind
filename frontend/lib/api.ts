@@ -50,7 +50,9 @@ export const forkBranch=(checkpointId:string) =>
 export const getTree=(sessionId:string) =>
     fetch(`${BASE}/sessions/${sessionId}/tree`).then(r => r.json()) as Promise<{ branches: Branch[]; checkpoints: Checkpoint[] }>
 
-// ✅ FIXED: Pass the question string down into the body dictionary object payload
+export const revertToCheckpoint = (checkpointId:string) => 
+    fetch(`${BASE}/checkpoints/${checkpointId}/revert`,{method:'POST'}).then(r=>r.json())
+
 export const queryGraph = (sessionId: string, question: string) =>
     fetch(`${BASE}/sessions/${sessionId}/query`, {
         method: 'POST',
