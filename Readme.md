@@ -12,6 +12,98 @@ Every conversation is a branch. You checkpoint it, fork it into parallel directi
 
 ---
 
+## How the Knowledge Graph Works
+
+### Cognee Integration
+
+BranchMind uses [Cognee](https://github.com/topoteretes/cognee) as its knowledge graph engine. Cognee runs a full entity/relation extraction pipeline on every conversation exchange and stores the result in an internal graph database — giving BranchMind persistent, queryable memory across all branches of a session.
+
+#### Configuration
+
+Cognee is configured entirely via environment variables before import, using Groq as the LLM provider through LiteLLM's custom provider path, and FastEmbed for local embeddings:
+
+```python
+os.environ["LLM_PROVIDER"] = "groq"
+os.environ["LLM_MODEL"] = "groq/llama-3.3-70b-versatile"
+os.environ["LLM_API_KEY"] = settings.groq_api_key
+
+os.environ["EMBEDDING_PROVIDER"] = "fastembed"
+os.environ["EMBEDDING_MODEL"] = "sentence-transformers/all-MiniLM-L6-v2"
+os.environ["EMBEDDING_DIMENSIONS"] = "384"
+
+os.environ["COGNEE_SKIP_CONNECTION_TEST"] = "true"
+```
+
+FastEmbed runs fully locally (ONNX, CPU) — no embedding API key, no rate limits, no cost.
+
+#### Dataset Scoping
+
+Each BranchMind session gets its own isolated Cognee dataset — `session_{session_id}`. This ensures two different sessions never bleed into each other's knowledge graph. All branches within a session share the same dataset, which is what enables cross-branch querying.
+
+```python
+dataset_name = f"session_{session_id}"
+```
+
+#### Ingestion Pipeline (per message exchange)
+
+Every user+assistant exchange is ingested as a background task so the chat response is returned immediately without blocking:
+
+```python
+# runs as FastAPI BackgroundTask after every reply
+async def ingest_exchange(session_id, branch_id, user_content, assistant_content):
+    item = DataItem(
+        data=f"User: {user_content}\nAssistant: {assistant_content}",
+        label=f"branch-{branch_id}",
+        external_metadata={"branch_id": branch_id},
+    )
+    await cognee.add(item, dataset_name=dataset_name)
+    await cognee.cognify(datasets=[dataset_name])
+```
+
+`cognify()` runs Cognee's full pipeline:
+- Document classification
+- Chunk extraction
+- Entity + relationship extraction via structured LLM calls (Groq)
+- Vector embedding via FastEmbed
+- Graph storage in Cognee's internal Kuzu graph database
+
+Average `cognify()` time with Groq: **~3.5 seconds**.
+
+#### Cross-Branch Query
+
+Queries use `GRAPH_COMPLETION` search type — Cognee retrieves relevant graph nodes via vector similarity, walks the graph edges, then uses the LLM to synthesize a natural language answer from the subgraph:
+
+```python
+results = await cognee.search(
+    query_text=question,
+    query_type=cognee.SearchType.GRAPH_COMPLETION,
+    datasets=[dataset_name],
+)
+```
+
+This is what powers the "ask across all branches" feature — decisions made on any branch are in the same dataset graph, so a single query surfaces answers from the full session history regardless of which branch they were made on.
+
+#### Dependency Extraction
+
+After every `cognify()` pass, a second lightweight Groq call runs a structured extraction prompt to detect decision dependencies:
+
+```python
+# extracts relationships like:
+# { from: "prisma orm", to: "postgresql", relationship: "requires" }
+```
+
+Supported relationship types: `requires`, `builds on`, `conflicts with`, `extends`.
+
+Results are stored in Supabase's `decision_dependencies` table and rendered as color-coded labels inside checkpoint nodes in the React Flow tree:
+- 🔴 `requires`
+- 🟢 `builds on`
+- 🟡 `conflicts with`
+- 🔵 `extends`
+
+---
+
+---
+
 ## Features
 
 - **Checkpoint** — snapshot a conversation at any point
@@ -124,97 +216,6 @@ Open `localhost:3000`.
 | GET | `/sessions/:id/dependencies` | Get decision dependencies |
 | POST | `/sessions/:id/query` | Query the knowledge graph |
 
----
-
-## How the Knowledge Graph Works
-
-### Cognee Integration
-
-BranchMind uses [Cognee](https://github.com/topoteretes/cognee) as its knowledge graph engine. Cognee runs a full entity/relation extraction pipeline on every conversation exchange and stores the result in an internal graph database — giving BranchMind persistent, queryable memory across all branches of a session.
-
-#### Configuration
-
-Cognee is configured entirely via environment variables before import, using Groq as the LLM provider through LiteLLM's custom provider path, and FastEmbed for local embeddings:
-
-```python
-os.environ["LLM_PROVIDER"] = "groq"
-os.environ["LLM_MODEL"] = "groq/llama-3.3-70b-versatile"
-os.environ["LLM_API_KEY"] = settings.groq_api_key
-
-os.environ["EMBEDDING_PROVIDER"] = "fastembed"
-os.environ["EMBEDDING_MODEL"] = "sentence-transformers/all-MiniLM-L6-v2"
-os.environ["EMBEDDING_DIMENSIONS"] = "384"
-
-os.environ["COGNEE_SKIP_CONNECTION_TEST"] = "true"
-```
-
-FastEmbed runs fully locally (ONNX, CPU) — no embedding API key, no rate limits, no cost.
-
-#### Dataset Scoping
-
-Each BranchMind session gets its own isolated Cognee dataset — `session_{session_id}`. This ensures two different sessions never bleed into each other's knowledge graph. All branches within a session share the same dataset, which is what enables cross-branch querying.
-
-```python
-dataset_name = f"session_{session_id}"
-```
-
-#### Ingestion Pipeline (per message exchange)
-
-Every user+assistant exchange is ingested as a background task so the chat response is returned immediately without blocking:
-
-```python
-# runs as FastAPI BackgroundTask after every reply
-async def ingest_exchange(session_id, branch_id, user_content, assistant_content):
-    item = DataItem(
-        data=f"User: {user_content}\nAssistant: {assistant_content}",
-        label=f"branch-{branch_id}",
-        external_metadata={"branch_id": branch_id},
-    )
-    await cognee.add(item, dataset_name=dataset_name)
-    await cognee.cognify(datasets=[dataset_name])
-```
-
-`cognify()` runs Cognee's full pipeline:
-- Document classification
-- Chunk extraction
-- Entity + relationship extraction via structured LLM calls (Groq)
-- Vector embedding via FastEmbed
-- Graph storage in Cognee's internal Kuzu graph database
-
-Average `cognify()` time with Groq: **~3.5 seconds**.
-
-#### Cross-Branch Query
-
-Queries use `GRAPH_COMPLETION` search type — Cognee retrieves relevant graph nodes via vector similarity, walks the graph edges, then uses the LLM to synthesize a natural language answer from the subgraph:
-
-```python
-results = await cognee.search(
-    query_text=question,
-    query_type=cognee.SearchType.GRAPH_COMPLETION,
-    datasets=[dataset_name],
-)
-```
-
-This is what powers the "ask across all branches" feature — decisions made on any branch are in the same dataset graph, so a single query surfaces answers from the full session history regardless of which branch they were made on.
-
-#### Dependency Extraction
-
-After every `cognify()` pass, a second lightweight Groq call runs a structured extraction prompt to detect decision dependencies:
-
-```python
-# extracts relationships like:
-# { from: "prisma orm", to: "postgresql", relationship: "requires" }
-```
-
-Supported relationship types: `requires`, `builds on`, `conflicts with`, `extends`.
-
-Results are stored in Supabase's `decision_dependencies` table and rendered as color-coded labels inside checkpoint nodes in the React Flow tree:
-- 🔴 `requires`
-- 🟢 `builds on`
-- 🟡 `conflicts with`
-- 🔵 `extends`
-
----
 
 ## Database Schema
 
